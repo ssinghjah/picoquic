@@ -47,6 +47,8 @@
 #include <autoqlog.h>
 #include <picoquic_packet_loop.h>
 #include "picoquic_sample.h"
+#include <sys/time.h>
+#define DEBUG 0
 
  /* Client context and callback management:
   *
@@ -130,7 +132,7 @@ static int sample_client_create_stream(picoquic_cnx_t* cnx,
             fprintf(stdout, "Error %d, cannot initialize stream for file number %d\n", ret, (int)file_rank);
         }
         else {
-            printf("Opened stream %d for file %s\n", 4 * file_rank, client_ctx->file_names[file_rank]);
+            printf("Opened stream %d\n", 4 * file_rank, client_ctx->file_names[file_rank]);
         }
     }
 
@@ -200,6 +202,7 @@ int sample_client_callback(picoquic_cnx_t* cnx,
     uint64_t stream_id, uint8_t* bytes, size_t length,
     picoquic_call_back_event_t fin_or_event, void* callback_ctx, void* v_stream_ctx)
 {
+    //printf("Client callback \n");
     int ret = 0;
     sample_client_ctx_t* client_ctx = (sample_client_ctx_t*)callback_ctx;
     sample_client_stream_ctx_t* stream_ctx = (sample_client_stream_ctx_t*)v_stream_ctx;
@@ -214,6 +217,10 @@ int sample_client_callback(picoquic_cnx_t* cnx,
         switch (fin_or_event) {
         case picoquic_callback_stream_data:
         case picoquic_callback_stream_fin:
+            if (DEBUG)
+            {
+                printf("Data or fin \n");
+            }
             /* Data arrival on stream #x, maybe with fin mark */
             if (stream_ctx == NULL) {
                 /* This is unexpected, as all contexts were declared when initializing the
@@ -228,9 +235,10 @@ int sample_client_callback(picoquic_cnx_t* cnx,
                 /* Unexpected: receive after fin */
                 return -1;
             }
-            else
-            {
-                if (stream_ctx->F == NULL) {
+            else{
+                
+                if (stream_ctx->F == NULL) 
+                {
                     /* Open the file to receive the data. This is done at the last possible moment,
                      * to minimize the number of files open simultaneously.
                      * When formatting the file_path, verify that the directory name is zero-length,
@@ -240,7 +248,8 @@ int sample_client_callback(picoquic_cnx_t* cnx,
                     size_t dir_len = strlen(client_ctx->default_dir);
                     size_t file_name_len = strlen(client_ctx->file_names[stream_ctx->file_rank]);
 
-                    if (dir_len > 0 && dir_len < sizeof(file_path)) {
+                    if (dir_len > 0 && dir_len < sizeof(file_path)) 
+                    {
                         memcpy(file_path, client_ctx->default_dir, dir_len);
                         if (file_path[dir_len - 1] != PICOQUIC_FILE_SEPARATOR[0]) {
                             file_path[dir_len] = PICOQUIC_FILE_SEPARATOR[0];
@@ -248,17 +257,19 @@ int sample_client_callback(picoquic_cnx_t* cnx,
                         }
                     }
 
-                    if (dir_len + file_name_len + 1 >= sizeof(file_path)) {
+                    if (dir_len + file_name_len + 1 >= sizeof(file_path)) 
+                    {
                         /* Unexpected: could not format the file name */
                         fprintf(stderr, "Could not format the file path.\n");
                         ret = -1;
-                    } else {
-                        memcpy(file_path + dir_len, client_ctx->file_names[stream_ctx->file_rank],
-                            file_name_len);
+                    } 
+                    else 
+                    {
+                        memcpy(file_path + dir_len, client_ctx->file_names[stream_ctx->file_rank], file_name_len);
                         file_path[dir_len + file_name_len] = 0;
                         stream_ctx->F = picoquic_file_open(file_path, "wb");
-
-                        if (stream_ctx->F == NULL) {
+                        if (stream_ctx->F == NULL) 
+                        {
                             /* Could not open the file */
                             fprintf(stderr, "Could not open the file: %s\n", file_path);
                             ret = -1;
@@ -267,11 +278,24 @@ int sample_client_callback(picoquic_cnx_t* cnx,
                 }
 
                 if (ret == 0 && length > 0) {
+                    struct timeval tv;
+                    gettimeofday(&tv, NULL);
+                    unsigned long long millisecondsSinceEpoch = (unsigned long long)(tv.tv_sec) * 1000 + (unsigned long long)(tv.tv_usec) / 1000;
+                    printf("Timestamp: %llu\n",millisecondsSinceEpoch);
+                    for(int i = 0; i < length; i++)
+                    {
+                        printf("%c", bytes[i]);
+                    }
+                    printf("\n--------\n");
+                    fflush(stdout);
+
+                    send_to_app_via_udp(length, bytes);
+
                     /* write the received bytes to the file */
                     if (fwrite(bytes, length, 1, stream_ctx->F) != 1) {
                         /* Could not write file to disk */
                         fprintf(stderr, "Could not write data to disk.\n");
-                        ret = -1;
+                        ret = -1;                        
                     }
                     else {
                         stream_ctx->bytes_received += length;
@@ -279,13 +303,23 @@ int sample_client_callback(picoquic_cnx_t* cnx,
                 }
 
                 if (ret == 0 && fin_or_event == picoquic_callback_stream_fin) {
+                    if(DEBUG)
+                    {
+                        printf("Server asked to close the connection. \n");
+                    }
                     stream_ctx->F = picoquic_file_close(stream_ctx->F);
                     stream_ctx->is_stream_finished = 1;
                     client_ctx->nb_files_received++;
 
                     if ((client_ctx->nb_files_received + client_ctx->nb_files_failed) >= client_ctx->nb_files) {
-                        /* everything is done, close the connection */
+                        // everything is done, close the connection 
                         ret = picoquic_close(cnx, 0);
+                        printf("Time stop .... \n");
+                        struct timeval tv;
+
+                        gettimeofday(&tv, NULL);
+                        unsigned long long millisecondsSinceEpoch = (unsigned long long)(tv.tv_sec) * 1000 + (unsigned long long)(tv.tv_usec) / 1000;
+                        printf("%llu\n", millisecondsSinceEpoch);
                     }
                 }
             }
@@ -348,7 +382,8 @@ int sample_client_callback(picoquic_cnx_t* cnx,
             if (stream_ctx == NULL) {
                 /* Decidedly unexpected */
                 return -1;
-            } else if (stream_ctx->name_sent_length < stream_ctx->name_length){
+            } else if (stream_ctx->name_sent_length < stream_ctx->name_length)
+            {
                 uint8_t* buffer;
                 size_t available = stream_ctx->name_length - stream_ctx->name_sent_length;
                 int is_fin = 1;
@@ -390,6 +425,32 @@ int sample_client_callback(picoquic_cnx_t* cnx,
     }
 
     return ret;
+}
+
+
+void send_to_app_via_udp(int msg_size, uint8_t* msg_buffer)
+{
+    // Create UDP socket to send encoded packets to the proxy
+	int sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (sockfd < 0)
+	{
+	  printf("Error creating socket \n");
+	}
+
+    struct sockaddr_in serveraddr;
+	serveraddr.sin_family = AF_INET;
+	serveraddr.sin_addr.s_addr = inet_addr("127.0.0.1"); // Proxy IP
+	
+    int portno = 2002; // Proxy Port
+	serveraddr.sin_port = htons(portno);
+	int serveraddr_len = sizeof(serveraddr);
+
+	// Send packets via UDP
+	if(sendto(sockfd, msg_buffer, msg_size, 0, &serveraddr, serveraddr_len) < 0){
+		  printf("Error in sending packet /n ...");
+	}
+	close(sockfd);
+
 }
 
 /* Sample client,  loop call back management.

@@ -49,9 +49,9 @@
 static void usage(char const * sample_name)
 {
     fprintf(stderr, "Usage:\n");
-    fprintf(stderr, "    %s client server_name port folder *queried_file\n", sample_name);
+    fprintf(stderr, "    %s rx server_name port folder *queried_file\n", sample_name);
     fprintf(stderr, "or :\n");
-    fprintf(stderr, "    %s server port cert_file private_key_file folder\n", sample_name);
+    fprintf(stderr, "    %s tx port cert_file private_key_file folder\n", sample_name);
     exit(1);
 }
 
@@ -72,11 +72,11 @@ int main(int argc, char** argv)
     WSADATA wsaData = { 0 };
     (void)WSA_START(MAKEWORD(2, 2), &wsaData);
 #endif
-
+    printf("Sockets over QUIC ....");
     if (argc < 2) {
         usage(argv[0]);
     }
-    else if (strcmp(argv[1], "client") == 0) {
+    else if (strcmp(argv[1], "rx") == 0) {
         if (argc < 6) {
             usage(argv[0]);
         }
@@ -88,7 +88,7 @@ int main(int argc, char** argv)
             exit_code = picoquic_sample_client(argv[2], server_port, argv[4], nb_files, file_names);
         }
     }
-    else if (strcmp(argv[1], "server") == 0) {
+    else if (strcmp(argv[1], "tx") == 0) {
         if (argc < 5) {
             usage(argv[0]);
         }
