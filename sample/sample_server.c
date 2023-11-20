@@ -77,6 +77,7 @@
  * for each of the call back events.
  */
 
+int sockfd = 1;
 
 typedef struct st_sample_server_stream_ctx_t {
     struct st_sample_server_stream_ctx_t* next_stream;
@@ -222,9 +223,7 @@ void sample_server_delete_context(sample_server_ctx_t* server_ctx)
 int sample_server_callback(picoquic_cnx_t* cnx,
     uint64_t stream_id, uint8_t* bytes, size_t length,
     picoquic_call_back_event_t fin_or_event, void* callback_ctx, void* v_stream_ctx)
-{
-    // printf("callback called\n");
-    // printf("%d\n",fin_or_event);
+{    
     fflush(stdout);
   
     int ret = 0;
@@ -338,7 +337,7 @@ int sample_server_callback(picoquic_cnx_t* cnx,
             }
             break;
         case picoquic_callback_prepare_to_send:
-            printf("Server Callback: Prepare to send ... \n");
+            // printf("Server Callback: Prepare to send ... \n");
 	        fflush(stdout);
             /* Active sending API */
             if (stream_ctx == NULL) 
@@ -353,52 +352,52 @@ int sample_server_callback(picoquic_cnx_t* cnx,
             {
                 /* Implement the zero copy callback */
 
-                size_t available = stream_ctx->file_length - stream_ctx->file_sent;
+                // size_t available = stream_ctx->file_length - stream_ctx->file_sent;
                 int is_fin = 1;
                 uint8_t* buffer;
                 
                 uint8_t app_buffer[MAXLINE];
-                // printf("\nlength=%d\n", length);
-                // printf("available = %d\n", available);
-
-                // printf("----------\n");
-                size_t app_msg_size = -1;
-                if (available > length) 
-                {
-                    available = length;
-                    is_fin = 0;
-                }
                 
-                buffer = picoquic_provide_stream_data_buffer(bytes, available, is_fin, !is_fin);
+                int app_msg_size = -1;               
                 
-                app_socket(&app_msg_size, app_buffer);                
+                is_fin = 0;
 
-
+                recv_from_app_socket(&app_msg_size, app_buffer);  
+                printf("app message size = %u\n", app_msg_size);
+                // if (app_msg_size > length) 
+                // {
+                //     printf("app msg size > length");
+                //     fflush(stdout);
+                //     app_msg_size = length;
+                //     is_fin = 0;
+                // }
+                
+                // buffer = picoquic_provide_stream_data_buffer(bytes, length, is_fin, !is_fin);
+                buffer = picoquic_provide_stream_data_buffer(bytes, length, is_fin, !is_fin);
+                
+                
                 // read buffer from socket and send with number of bytes read
                 if (buffer != NULL)
                 {          
-                    printf("Copying buffers from app \n");
-                    // for (int i = 0; i < available; i++)
-                    // {
-                    //     printf("%c",app_buffer[i]);
-                    // }
-
-                    for (int i = 0; i < available; i++)
+                    for (int i = 0; i < app_msg_size; i++)
                     {
-                        // buffer[i] = 't';
+                        fflush(stdout);
                         buffer[i] = app_buffer[i];
-                    }          
-
-                    // memcpy(buffer, app_buffer, available);
-                    // for (int i = 0; i < available; i++)
+                    }
+                    fflush(stdout);
+                    // if(app_msg_size < length)
                     // {
-                    //     printf("%c", app_buffer[i]);
+                    //     printf("Available < length \n");
                     //     fflush(stdout);
-                    // }
-                    stream_ctx->file_sent += available;
-                    size_t nb_read = available;
-                    // size_t nb_read = fread(buffer, 1, available, stream_ctx->F);                  
-                    if (nb_read != available) 
+                    //     for(int i = app_msg_size; i < length; i++)
+                    //     {
+                    //         buffer[i] = '0';
+                    //     }
+                    // }          
+
+                    stream_ctx->file_sent += app_msg_size;
+                    size_t nb_read = app_msg_size;
+                    if (nb_read != app_msg_size) 
                     {
                         /* Error while reading the file */
                         sample_server_delete_stream_context(server_ctx, stream_ctx);
@@ -406,7 +405,7 @@ int sample_server_callback(picoquic_cnx_t* cnx,
                     }
                     else 
                     {
-                        stream_ctx->file_sent += available;
+                        stream_ctx->file_sent += app_msg_size;
                     }
                 }
                 else 
@@ -458,15 +457,64 @@ int sample_server_callback(picoquic_cnx_t* cnx,
     return ret;
 }
 
-int app_socket(int* msg_size, u_int8_t* app_message)
+int create_app_socket()
+{
+    printf("Creating UDP socket for app messages.... \n");
+	//	int sockfd;
+	struct sockaddr_in servaddr, cliaddr;
+
+	// Creating socket file descriptor
+	if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)        
+        {
+		perror("socket creation failed");
+		exit(EXIT_FAILURE);
+	}
+
+	memset(&servaddr, 0, sizeof(servaddr));
+	memset(&cliaddr, 0, sizeof(cliaddr));
+
+	// Filling server information
+	servaddr.sin_family = AF_INET; // IPv4
+	servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	servaddr.sin_port = htons(PORT);
+
+	// Bind the socket with the server address
+	if (bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0 )
+	{
+	  printf("Error");
+	  fflush(stdout);
+	  perror("bind failed");
+	  exit(EXIT_FAILURE);
+	}
+
+	return sockfd;
+}
+
+
+int recv_from_app_socket(int* msg_size, u_int8_t* app_message)
 {    
-    printf("Listening on UDP socket for app messages.... \n");
+    printf("Listening for app messags ... \n");
+    int n;
+    struct sockaddr_in servaddr, cliaddr;
+    socklen_t len = sizeof(cliaddr);
+    fflush(stdout);
+    n = recvfrom(sockfd, app_message, MAXLINE, 0, (struct sockaddr *) &cliaddr, &len);
+    printf("Received %d bytes from UDP port. \n", n);
+    *msg_size = n;
+    return app_message;
+}
+
+
+
+int app_socket_2(int* msg_size, u_int8_t* app_message)
+{    
+        printf("Listening on UDP socket for app messages.... \n");
 	int sockfd;
 	struct sockaddr_in servaddr, cliaddr;
 
 	// Creating socket file descriptor
 	if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)        
-    {
+        {
 		perror("socket creation failed");
 		exit(EXIT_FAILURE);
 	}
@@ -490,28 +538,14 @@ int app_socket(int* msg_size, u_int8_t* app_message)
 
 	int n;
 	socklen_t len = sizeof(cliaddr);
-    fflush(stdout);
-    n = recvfrom(sockfd, app_message, MAXLINE, 0, (struct sockaddr *) &cliaddr, &len);
-    printf("Received %d bytes from UDP port. \n", n);
-    printf("MSG Size: %d\n", *msg_size);
-    *msg_size = n;
-    close(sockfd);
-
-    /* Uncomment to print out the received bytes, for debugging.
-    printf("%d\n", n);
-    for(int i = 0; i < n; i++)
-    {
-        printf("%u", buffer[i]);
-    }
-    printf("\n--------\n");
-    fflush(stdout);
-    */
-    // fwrite(buffer, 1, n, f);
-
-	// fclose(f);
-    printf("Returning message \n");
+	fflush(stdout);
+	n = recvfrom(sockfd, app_message, MAXLINE, 0, (struct sockaddr *) &cliaddr, &len);
+	printf("Received %d bytes from UDP port. \n", n);
+	printf("MSG Size: %d\n", *msg_size);
+	*msg_size = n;
+	close(sockfd);
+	printf("Returning message \n");
 	return app_message;
-
 }
 
 /* Server loop setup:
@@ -560,7 +594,7 @@ int picoquic_sample_server(int server_port, const char* server_cert, const char*
         picoquic_set_log_level(quic, 1);
         picoquic_set_key_log_file_from_env(quic);
     }
-
+    printf("%d\n", ret);
     /* Wait for packets using the wait loop provided in the library.
      * On Linux, the default is to use UDP GSO when the system version is
      * recent enough to provide it, because this provides much better
@@ -570,13 +604,19 @@ int picoquic_sample_server(int server_port, const char* server_cert, const char*
      * changed to 1, i.e. passing "do_not_use_gso = 1". Or, better
      * still, get the faulty driver fixed.
      */
+    create_app_socket();
+    
     if (ret == 0) {
         ret = picoquic_packet_loop(quic, server_port, 0, 0, 0, 0, NULL, NULL);
     }
 
+    
+
     /* And finish. */
     printf("Server exit, ret = %d\n", ret);
 
+    close(sockfd);
+    
     /* Clean up */
     if (quic != NULL) {
         picoquic_free(quic);

@@ -1132,6 +1132,8 @@ void binlog_cc_dump(picoquic_cnx_t* cnx, uint64_t current_time)
         bytewrite_vint(ps_msg, path->one_way_delay_sample);
         bytewrite_vint(ps_msg, path->rtt_sample);
         bytewrite_vint(ps_msg, path->smoothed_rtt);
+        printf("rtt=%lu\n", path->smoothed_rtt);
+        fflush(stdout);
         bytewrite_vint(ps_msg, path->rtt_min);
         bytewrite_vint(ps_msg, path->bandwidth_estimate);
         bytewrite_vint(ps_msg, path->receive_rate_estimate);

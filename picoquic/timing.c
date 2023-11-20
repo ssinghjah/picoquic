@@ -325,6 +325,8 @@ void picoquic_update_path_rtt(picoquic_cnx_t* cnx, picoquic_path_t* old_path, pi
                 0, 0, current_time);
         }
 
+        printf("rtt=%d \n", rtt_estimate);
+        fflush(stdout);
         /* On very first sample, apply the saved BDP */
         if (is_first) {
             picoquic_validate_bdp_seed(cnx, old_path, rtt_estimate, current_time);
