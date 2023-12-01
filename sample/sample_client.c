@@ -74,6 +74,8 @@
   * for each of the call back events.
   */
 
+int sockfd_client = -1;
+
 typedef struct st_sample_client_stream_ctx_t {
     struct st_sample_client_stream_ctx_t* next_stream;
     size_t file_rank;
@@ -428,28 +430,41 @@ int sample_client_callback(picoquic_cnx_t* cnx,
 }
 
 
+void create_rx_app_socket()
+{
+  // Create UDP socket to send encoded packets to the proxy
+  sockfd_client = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (sockfd_client < 0)
+  {
+      printf("Error creating socket \n");
+   }
+}
+
 void send_to_app_via_udp(int msg_size, uint8_t* msg_buffer)
 {
-    // Create UDP socket to send encoded packets to the proxy
-	int sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  /*
+        // Create UDP socket to send encoded packets to the proxy
+	sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (sockfd < 0)
 	{
 	  printf("Error creating socket \n");
-	}
+	  }*/
 
-    struct sockaddr_in serveraddr;
+	struct sockaddr_in serveraddr;
 	serveraddr.sin_family = AF_INET;
 	serveraddr.sin_addr.s_addr = inet_addr("127.0.0.1"); // Proxy IP
 	
-    int portno = 2002; // Proxy Port
+	int portno = 2002; // Proxy Port
 	serveraddr.sin_port = htons(portno);
 	int serveraddr_len = sizeof(serveraddr);
-
+	printf("Writing to app socket\n");
+	fflush(stdout);
 	// Send packets via UDP
-	if(sendto(sockfd, msg_buffer, msg_size, 0, &serveraddr, serveraddr_len) < 0){
+	if(sendto(sockfd_client, msg_buffer, msg_size, 0, &serveraddr, serveraddr_len) < 0){
 		  printf("Error in sending packet /n ...");
+		  fflush(stdout);
 	}
-	close(sockfd);
+	// close(sockfd);
 
 }
 
@@ -553,9 +568,8 @@ int picoquic_sample_client(char const * server_name, int server_port, char const
             if (picoquic_load_retry_tokens(quic, token_store_filename) != 0) {
                 fprintf(stderr, "No token file present. Will create one as <%s>.\n", token_store_filename);
             }
-
+	    create_rx_app_socket();
             picoquic_set_default_congestion_algorithm(quic, picoquic_bbr_algorithm);
-
             picoquic_set_key_log_file_from_env(quic);
             picoquic_set_qlog(quic, qlog_dir);
             picoquic_set_log_level(quic, 1);
@@ -629,6 +643,6 @@ int picoquic_sample_client(char const * server_name, int server_port, char const
 
     /* Free the Client context */
     sample_client_free_context(&client_ctx);
-
+    close(sockfd_client);
     return ret;
 }
