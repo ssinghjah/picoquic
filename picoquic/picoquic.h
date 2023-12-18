@@ -40,7 +40,7 @@
 extern "C" {
 #endif
 
-#define PICOQUIC_VERSION "1.1.14.0"
+#define PICOQUIC_VERSION "1.1.16.1"
 #define PICOQUIC_ERROR_CLASS 0x400
 #define PICOQUIC_ERROR_DUPLICATE (PICOQUIC_ERROR_CLASS + 1)
 #define PICOQUIC_ERROR_AEAD_CHECK (PICOQUIC_ERROR_CLASS + 3)
@@ -287,7 +287,7 @@ typedef struct st_picoquic_tp_t {
     uint64_t initial_max_data;
     uint64_t initial_max_stream_id_bidir;
     uint64_t initial_max_stream_id_unidir;
-    uint64_t idle_timeout;
+    uint64_t max_idle_timeout;
     uint32_t max_packet_size;
     uint32_t max_ack_delay; /* stored in in microseconds for convenience */
     uint32_t active_connection_id_limit;
@@ -641,8 +641,33 @@ void picoquic_set_cwin_max(picoquic_quic_t* quic, uint64_t cwin_max);
 */
 void picoquic_set_max_data_control(picoquic_quic_t* quic, uint64_t max_data);
 
+/*
+* Idle timeout and handshake timeout
+* 
+* The max idle timeout determines how long to wait for sign of activity from
+* the peer before giving up on a connection. It is set by default to 
+* PICOQUIC_MICROSEC_HANDSHAKE_MAX, coverted in milliseconds (30 seconds).
+* It can be set per quic context using `picoquic_set_default_idle_timeout`,
+* before creating new connections in that context. The value is expressed
+* in milliseconds, with zero meaning "infinity". The value used for the
+* connection is the lowest of the value proposed by the client and the server,
+* as specified in RFC 9000.
+* 
+* The handshake timeout determines how long to wait for the completion
+* of a connection. It can be specified per QUIC context using
+* `picoquic_set_default_handshake_timeout`. The value is expressed
+* in microseconds, with `0` meaning unspecified.
+* 
+* If the handshake timeout is not specified, the wait time is determined by the
+* value of the default idle timeout specified for the QUIC context. If that
+* value is zero, the system uses the value of PICOQUIC_MICROSEC_HANDSHAKE_MAX,
+* i.e., 30 seconds.
+*/
+
 /* Set the idle timeout parameter for the context. Value is in milliseconds. */
-void picoquic_set_default_idle_timeout(picoquic_quic_t* quic, uint64_t idle_timeout);
+void picoquic_set_default_idle_timeout(picoquic_quic_t* quic, uint64_t idle_timeout_ms);
+/* Set the default handshake timeout parameter for the context.*/
+void picoquic_set_default_handshake_timeout(picoquic_quic_t* quic, uint64_t handshake_timeout_us);
 
 /* Set the length of a crypto epoch -- force rotation after that many packets sent */
 void picoquic_set_default_crypto_epoch_length(picoquic_quic_t* quic, uint64_t crypto_epoch_length_max);
@@ -1147,6 +1172,31 @@ int picoquic_set_stream_priority(picoquic_cnx_t* cnx, uint64_t stream_id, uint8_
 
 int picoquic_mark_high_priority_stream(picoquic_cnx_t* cnx,
     uint64_t stream_id, int is_high_priority);
+
+/* 
+* Handling of datagram priorities
+* 
+* All datagrams sent on a connection have the same priority.
+* The datagram priority value determines the relative priority of
+* streams and datagrams.
+* 
+* Streams with a higher priority than the datagram priority will be
+* scheduled before any datagram. Streams with a lower priority
+* will only be scheduled if no datagram needs to be sent. 
+* Streams with the same priority as the datagram priority will
+* be scheduled in a  "round robin" manner: datagram on one round,
+* then a stream on the next round, then back to datagrams, the general
+* idea being about equal share for the datagrams and all streams of
+* the same priority.
+* 
+* By default, the datagram priority is set to the value
+* PICOQUIC_DEFAULT_STREAM_PRIORITY, same as streams, so the default behavior
+* is a 50/50 share.
+*/
+
+void picoquic_set_default_datagram_priority(picoquic_quic_t* quic, uint8_t default_datagram_priority);
+
+void picoquic_set_datagram_priority(picoquic_cnx_t * cnx, uint8_t datagram_priority);
 
 /* If a stream is marked active, the application will receive a callback with
  * event type "picoquic_callback_prepare_to_send" when the transport is ready to

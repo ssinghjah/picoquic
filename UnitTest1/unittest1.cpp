@@ -1020,6 +1020,27 @@ namespace UnitTest1
             Assert::AreEqual(ret, 0);
         }
 
+        TEST_METHOD(heavy_loss)
+        {
+            int ret = heavy_loss_test();
+
+            Assert::AreEqual(ret, 0);
+        }
+
+        TEST_METHOD(heavy_loss_inter)
+        {
+            int ret = heavy_loss_inter_test();
+
+            Assert::AreEqual(ret, 0);
+        }
+
+        TEST_METHOD(heavy_loss_total)
+        {
+            int ret = heavy_loss_total_test();
+
+            Assert::AreEqual(ret, 0);
+        }
+
         TEST_METHOD(test_spurious_retransmit)
         {
             int ret = spurious_retransmit_test();
@@ -1582,6 +1603,20 @@ namespace UnitTest1
         TEST_METHOD(error_reason)
         {
             int ret = error_reason_test();
+
+            Assert::AreEqual(ret, 0);
+        }
+
+        TEST_METHOD(idle_server)
+        {
+            int ret = idle_server_test();
+
+            Assert::AreEqual(ret, 0);
+        }
+
+        TEST_METHOD(idle_timeout)
+        {
+            int ret = idle_timeout_test();
 
             Assert::AreEqual(ret, 0);
         }
@@ -2532,13 +2567,11 @@ namespace UnitTest1
             Assert::AreEqual(ret, 0);
         }
 
-#if 0
         TEST_METHOD(h09_multi_file_preemptive) {
             int ret = h09_multi_file_preemptive_test();
 
             Assert::AreEqual(ret, 0);
         }
-#endif
 
         TEST_METHOD(h3_multi_file) {
             int ret = h3_multi_file_test();
@@ -2552,13 +2585,11 @@ namespace UnitTest1
             Assert::AreEqual(ret, 0);
         }
 
-#if 0
         TEST_METHOD(h3_multi_file_preemptive) {
             int ret = h3_multi_file_preemptive_test();
 
             Assert::AreEqual(ret, 0);
         }
-#endif
 
         TEST_METHOD(h3zero_settings) {
             int ret = h3zero_settings_test();

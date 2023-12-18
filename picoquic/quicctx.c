@@ -653,6 +653,7 @@ picoquic_quic_t* picoquic_create(uint32_t max_nb_connections,
         quic->stateless_reset_next_time = current_time;
         quic->stateless_reset_min_interval = PICOQUIC_MICROSEC_STATELESS_RESET_INTERVAL_DEFAULT;
         quic->default_stream_priority = PICOQUIC_DEFAULT_STREAM_PRIORITY;
+        quic->default_datagram_priority = PICOQUIC_DEFAULT_STREAM_PRIORITY;
         quic->cwin_max = UINT64_MAX;
         quic->sequence_hole_pseudo_period = PICOQUIC_DEFAULT_HOLE_PERIOD;
 
@@ -834,10 +835,14 @@ void picoquic_set_max_data_control(picoquic_quic_t* quic, uint64_t max_data)
     }
 }
 
-void picoquic_set_default_idle_timeout(picoquic_quic_t* quic, uint64_t idle_timeout)
+void picoquic_set_default_idle_timeout(picoquic_quic_t* quic, uint64_t idle_timeout_ms)
 {
-    quic->default_idle_timeout = idle_timeout;
-    quic->default_tp.idle_timeout = idle_timeout;
+    quic->default_tp.max_idle_timeout = idle_timeout_ms;
+}
+
+void picoquic_set_default_handshake_timeout(picoquic_quic_t* quic, uint64_t handshake_timeout_us)
+{
+    quic->default_handshake_timeout = handshake_timeout_us;
 }
 
 void picoquic_set_default_crypto_epoch_length(picoquic_quic_t* quic, uint64_t crypto_epoch_length_max)
@@ -1223,7 +1228,7 @@ void picoquic_init_transport_parameters(picoquic_tp_t* tp, int client_mode)
     tp->initial_max_data = 0x100000;
     tp->initial_max_stream_id_bidir = 512;
     tp->initial_max_stream_id_unidir = 512;
-    tp->idle_timeout = PICOQUIC_MICROSEC_HANDSHAKE_MAX/1000;
+    tp->max_idle_timeout = PICOQUIC_MICROSEC_HANDSHAKE_MAX/1000;
     tp->max_packet_size = PICOQUIC_PRACTICAL_MAX_MTU;
     tp->max_datagram_frame_size = 0;
     tp->ack_delay_exponent = 3;
@@ -3359,6 +3364,9 @@ picoquic_cnx_t* picoquic_create_cnx(picoquic_quic_t* quic,
         cnx->rtt_update_delta = quic->rtt_update_delta;
         cnx->pacing_rate_update_delta = quic->pacing_rate_update_delta;
 
+        /* Initialize the stream data repeat queue */
+        picoquic_queue_data_repeat_init(cnx);
+
         /* Initialize the connection ID stash */
         ret = picoquic_create_path(cnx, start_time, NULL, addr_to);
         if (ret == 0) {
@@ -3379,6 +3387,7 @@ picoquic_cnx_t* picoquic_create_cnx(picoquic_quic_t* quic,
             cnx->path[0]->p_local_cnxid = cnxid0;
             cnx->path[0]->challenge_verified = 1;
 
+            cnx->datagram_priority = cnx->quic->default_datagram_priority;
             cnx->high_priority_stream_id = UINT64_MAX;
             for (int i = 0; i < 4; i++) {
                 cnx->next_stream_id[i] = i;
@@ -4271,9 +4280,7 @@ void picoquic_delete_cnx(picoquic_cnx_t* cnx)
             picoquic_delete_misc_or_dg(&cnx->first_datagram, &cnx->last_datagram, cnx->first_datagram);
         }
 
-        while (cnx->data_repeat_first != NULL) {
-            picoquic_dequeue_data_repeat_packet(cnx, cnx->data_repeat_first);
-        }
+        picosplay_empty_tree(&cnx->queue_data_repeat_tree);
 
         for (int epoch = 0; epoch < PICOQUIC_NUMBER_OF_EPOCHS; epoch++) {
             picoquic_clear_stream(&cnx->tls_stream[epoch]);
@@ -4552,7 +4559,7 @@ void picoquic_enable_keep_alive(picoquic_cnx_t* cnx, uint64_t interval)
         uint64_t idle_timeout = cnx->idle_timeout;
         if (idle_timeout == 0) {
             /* Idle timeout is only initialized after parameters are negotiated  */
-            idle_timeout = cnx->local_parameters.idle_timeout * 1000ull;
+            idle_timeout = cnx->local_parameters.max_idle_timeout * 1000ull;
         }
         /* Ensure at least 3 PTO*/
         if (idle_timeout < 3 * cnx->path[0]->retransmit_timer) {

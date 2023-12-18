@@ -8,7 +8,7 @@ else()
 endif()
 
 project(picoquic
-        VERSION 1.1.14.0
+        VERSION 1.1.16.1
         DESCRIPTION "picoquic library"
         LANGUAGES C CXX)
 
@@ -404,6 +404,13 @@ if(BUILD_TESTING AND picoquic_BUILD_TESTS)
              COMMAND picoquic_ct -S ${PROJECT_SOURCE_DIR} -n -r)
     add_test(NAME picohttp_ct
              COMMAND picohttp_ct -S ${PROJECT_SOURCE_DIR} -n -r)
+
+    add_executable(thread_test
+        thread_tester/thread_test.c)
+    target_link_libraries(thread_test PRIVATE picoquic-log picoquic-core)
+    target_include_directories(thread_test PRIVATE loglib picoquic)
+    set_picoquic_compile_settings(thread_test)
+
 endif()
 
 # get all project files for formatting

@@ -2577,15 +2577,17 @@ int h3_multi_file_test()
     return http_multi_file_test_one(PICOHTTP_ALPN_H3_LATEST, h3zero_callback, 0, 0);
 }
 
+#define H3ZERO_MULTI_LOSS_PATTERN 0xa242EDB710000ull
+
 int h3_multi_file_loss_test()
 {
-    uint64_t loss_pattern = 0xa243FFB700000ull;
+    uint64_t loss_pattern = H3ZERO_MULTI_LOSS_PATTERN;
     return http_multi_file_test_one(PICOHTTP_ALPN_H3_LATEST, h3zero_callback, loss_pattern, 0);
 }
 
 int h3_multi_file_preemptive_test()
 {
-    uint64_t loss_pattern = 0xa243FFB700000ull;
+    uint64_t loss_pattern = H3ZERO_MULTI_LOSS_PATTERN;
     return http_multi_file_test_one(PICOHTTP_ALPN_H3_LATEST, h3zero_callback, loss_pattern, 1);
 }
 
@@ -2596,14 +2598,14 @@ int h09_multi_file_test()
 
 int h09_multi_file_loss_test()
 {
-    uint64_t loss_pattern = 0xa243FFB700000ull; 
+    uint64_t loss_pattern = H3ZERO_MULTI_LOSS_PATTERN;
     return http_multi_file_test_one(PICOHTTP_ALPN_HQ_LATEST, picoquic_h09_server_callback, 
         loss_pattern, 0);
 }
 
 int h09_multi_file_preemptive_test()
 {
-    uint64_t loss_pattern = 0xa243FFB700000ull;
+    uint64_t loss_pattern = H3ZERO_MULTI_LOSS_PATTERN;
     return http_multi_file_test_one(PICOHTTP_ALPN_HQ_LATEST, picoquic_h09_server_callback,
         loss_pattern, 1);
 }
@@ -2803,6 +2805,7 @@ int http_stress_test_one(int do_corrupt, int do_drop, int initial_random)
     uint64_t server_time = 0;
     uint64_t random_context = picohttp_random_stress_context;
     size_t nb_stress_clients = picohttp_nb_stress_clients;
+    int nb_loops = 0;
 
     ret = picoquic_store_text_addr(&server_address, "1::1", 443);
 
@@ -2871,6 +2874,13 @@ int http_stress_test_one(int do_corrupt, int do_drop, int initial_random)
         size_t client_id = nb_stress_clients;
         picoquic_quic_t* qready = NULL;
         struct sockaddr* ready_from = NULL;
+
+        nb_loops++;
+        if (nb_loops > 10000000) {
+            DBG_PRINTF("Loop detected after %d iterations", nb_loops);
+            ret = -1;
+            break;
+        }
 
         if (is_lan_ready) {
             next_time = picoquictest_sim_link_next_arrival(lan, next_time);

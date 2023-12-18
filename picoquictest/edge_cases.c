@@ -537,6 +537,8 @@ int ec9a_preemptive_amok_test()
     picoquic_test_tls_api_ctx_t* test_ctx = NULL;
     uint64_t initial_losses = 0b100000000000;
     uint8_t test_case_id = 0x9a;
+    uint64_t cnx_server_idle_timeout = 0;
+    uint64_t cnx_server_nb_preemptive_repeat = 0;
     int ret = edge_case_prepare(&test_ctx, test_case_id, 0, &simulated_time, initial_losses, 12);
 
     if (ret == 0) {
@@ -566,14 +568,18 @@ int ec9a_preemptive_amok_test()
         picoquic_cnx_t * last_cnx;
         int loop_count = 0;
         int send_count = 0;
-        const int send_count_max = 30;
+        const int send_count_max = 50;
         uint64_t repeat_begin = simulated_time;
         uint64_t repeat_duration = 0;
 
+        cnx_server_idle_timeout = test_ctx->cnx_server->idle_timeout;
+        cnx_server_nb_preemptive_repeat = test_ctx->cnx_server->nb_preemptive_repeat;
+
         picoquic_reinsert_by_wake_time(test_ctx->qserver, test_ctx->cnx_server, simulated_time);
 
-        while (test_ctx->cnx_server->cnx_state == picoquic_state_ready && loop_count < 10000 && ret == 0) {
+        while (test_ctx->qserver->current_number_connections > 0 && test_ctx->cnx_server->cnx_state == picoquic_state_ready && loop_count < 10000 && ret == 0) {
             loop_count++;
+            cnx_server_nb_preemptive_repeat = test_ctx->cnx_server->nb_preemptive_repeat;
             simulated_time = picoquic_get_next_wake_time(test_ctx->qserver, simulated_time);
             ret = picoquic_prepare_next_packet_ex(test_ctx->qserver, simulated_time, buffer,
                 sizeof(buffer), &send_length, &addr_to, &addr_from, &if_index, &log_id,
@@ -593,12 +599,12 @@ int ec9a_preemptive_amok_test()
                     send_count, send_count_max);
                 ret = -1;
             }
-            else if (repeat_duration > test_ctx->cnx_server->idle_timeout) {
+            else if (repeat_duration > cnx_server_idle_timeout) {
                 DBG_PRINTF("End at t=%" PRIu64 ", later than %" PRIu64,
-                    simulated_time, test_ctx->cnx_server->idle_timeout);
+                    simulated_time, cnx_server_idle_timeout);
                 ret = -1;
             }
-            else if (test_ctx->cnx_server->nb_preemptive_repeat == 0) {
+            else if (cnx_server_nb_preemptive_repeat == 0) {
                 DBG_PRINTF("%s", "No preemptive repeat");
                 ret = -1;
             }
@@ -610,5 +616,245 @@ int ec9a_preemptive_amok_test()
         test_ctx = NULL;
     }
 
+    return ret;
+}
+
+/* testing the negotiation of the idle timeout.
+*/
+int idle_timeout_test_one(uint8_t test_id, uint64_t client_timeout, uint64_t server_timeout, uint64_t expected_timeout)
+{
+    picoquic_test_tls_api_ctx_t* test_ctx = NULL;
+    uint64_t simulated_time = 0;
+    uint64_t loss_mask = 0;
+    picoquic_connection_id_t initial_cid = { { 0x41, 0x9e, 0x00, 0x94, 0, 0, 0, 0}, 8 };
+    uint64_t half_time = (expected_timeout == UINT64_MAX) ? 20000000 : (expected_timeout / 2);
+    uint64_t full_time = (expected_timeout == UINT64_MAX) ? 600000000 : (half_time + 100000);
+    int ret = 0;
+
+    initial_cid.id[4] = test_id;
+
+    /* Create the test context */
+    if (ret == 0) {
+        ret = tls_api_init_ctx_ex(&test_ctx, PICOQUIC_INTERNAL_TEST_VERSION_1,
+            PICOQUIC_TEST_SNI, PICOQUIC_TEST_ALPN, &simulated_time, NULL, NULL, 0, 1, 0, &initial_cid);
+    }
+    /* Set the binlog */
+    if (ret == 0) {
+        picoquic_set_binlog(test_ctx->qclient, ".");
+        picoquic_set_binlog(test_ctx->qserver, ".");
+        /* Set the timeout */
+        picoquic_set_default_idle_timeout(test_ctx->qclient, client_timeout);
+        picoquic_set_default_idle_timeout(test_ctx->qserver, server_timeout);
+        /* Directly set the timeout in the client parameters,
+           because the connection context is already created */
+        test_ctx->cnx_client->local_parameters.max_idle_timeout = client_timeout;
+    }
+
+    /* Do the connection */
+    if (ret == 0) {
+        test_ctx->cnx_client->max_early_data_size = 0;
+
+        if ((ret = picoquic_start_client_cnx(test_ctx->cnx_client)) == 0) {
+            ret = tls_api_connection_loop(test_ctx, &loss_mask, 0, &simulated_time);
+        }
+    }
+
+    /* Verify the timer negotiation */
+    if (ret == 0) {
+        if (test_ctx->cnx_client->local_parameters.max_idle_timeout != client_timeout) {
+            DBG_PRINTF("Idle timeout test %d. Client parameter set to %" PRIu64 " instead of %" PRIu64 "\n",
+                test_id, test_ctx->cnx_client->local_parameters.max_idle_timeout, client_timeout);
+            ret = -1;
+        }
+        if (test_ctx->cnx_server->local_parameters.max_idle_timeout != server_timeout) {
+            DBG_PRINTF("Idle timeout test %d. Server parameter set to %" PRIu64 " instead of %" PRIu64 "\n",
+                test_id, test_ctx->cnx_server->local_parameters.max_idle_timeout, server_timeout);
+            ret = -1;
+        }
+        if (test_ctx->cnx_client->idle_timeout != expected_timeout) {
+            DBG_PRINTF("Idle timeout test %d. Client negotiated %" PRIu64 " instead of %" PRIu64 "\n",
+                test_id, test_ctx->cnx_client->idle_timeout, expected_timeout);
+            ret = -1;
+        }
+        if (test_ctx->cnx_server->idle_timeout != expected_timeout) {
+            DBG_PRINTF("Idle timeout test %d. Server negotiated %" PRIu64 " instead of %" PRIu64 "\n",
+                test_id, test_ctx->cnx_server->idle_timeout, expected_timeout);
+            ret = -1;
+        }
+    }
+
+    if (ret == 0) {
+        /* Wait for half time. Expectation: connections are still up */
+        ret = tls_api_wait_for_timeout(test_ctx, &simulated_time, half_time);
+        if (ret != 0 || !((TEST_CLIENT_READY && TEST_SERVER_READY))) {
+            DBG_PRINTF("Idle timeout test %d. Broke early, time = %" PRIu64 "\n", test_id, simulated_time);
+            ret = -1;
+        }
+    }
+
+    if (ret == 0) {
+        /* Wait for full time. Expectation: connections are down, unless timeout == 0 */
+        ret = tls_api_wait_for_timeout(test_ctx, &simulated_time, full_time);
+
+        if (ret == 0){
+            if (TEST_CLIENT_READY && TEST_SERVER_READY) {
+                if (expected_timeout != UINT64_MAX) {
+                    DBG_PRINTF("Idle timeout test %d. Waited too long, time = %" PRIu64 "\n", test_id, simulated_time);
+                    ret = -1;
+                }
+            }
+            else {
+                if (expected_timeout == UINT64_MAX) {
+                    DBG_PRINTF("Idle timeout test %d. Broke early, time = %" PRIu64 "\n", test_id, simulated_time);
+                    ret = -1;
+                }
+            }
+        }
+    }
+
+    if (test_ctx != NULL) {
+        tls_api_delete_ctx(test_ctx);
+        test_ctx = NULL;
+    }
+
+    return ret;
+}
+
+int idle_timeout_test()
+{
+    int ret = 0;
+
+    if ((ret = idle_timeout_test_one(1, 30000, 30000, 30000000)) == 0 &&
+        (ret = idle_timeout_test_one(2, 60000, 20000, 20000000)) == 0 &&
+        (ret = idle_timeout_test_one(3, 20000, 60000, 20000000)) == 0 &&
+        (ret = idle_timeout_test_one(4, 5000, 300000, 5000000)) == 0 &&
+        (ret = idle_timeout_test_one(5, 300000, 5000, 5000000)) == 0 &&
+        (ret = idle_timeout_test_one(6, 0, 5000, 5000000)) == 0 &&
+        (ret = idle_timeout_test_one(7, 0, 60000, 60000000)) == 0 &&
+        (ret = idle_timeout_test_one(8, 5000, 0, 5000000)) == 0 &&
+        (ret = idle_timeout_test_one(9, 60000, 0, 60000000)) == 0 &&
+        (ret = idle_timeout_test_one(10, 0, 0, UINT64_MAX)) == 0) {
+        DBG_PRINTF("%s", "All idle timeout tests pass.\n");
+    }
+    return ret;
+}
+
+/* Testing that connection attempt against a non responding server
+ * finishes after the timeout value.
+ */
+
+int idle_server_test_one(uint8_t test_id, uint64_t client_timeout, uint64_t handshake_timeout, uint64_t expected_timeout)
+{
+    picoquic_test_tls_api_ctx_t* test_ctx = NULL;
+    uint64_t simulated_time = 0;
+    uint64_t target_timeout;
+    uint64_t loss_mask = 0;
+    picoquic_connection_id_t initial_cid = { { 0x41, 0x9e, 0xc0, 0x99, 0, 0, 0, 0}, 8 };
+    uint8_t send_buffer[PICOQUIC_MAX_PACKET_SIZE];
+    int ret = 0;
+
+    initial_cid.id[4] = test_id;
+
+    /* derive target timeout form spec */
+    target_timeout = handshake_timeout;
+    if (handshake_timeout == 0) {
+        target_timeout = client_timeout * 1000;
+        if (client_timeout == 0) {
+            target_timeout = PICOQUIC_MICROSEC_HANDSHAKE_MAX;
+        }
+    }
+
+    /* Create the test context */
+    if (ret == 0) {
+        ret = tls_api_init_ctx_ex(&test_ctx, PICOQUIC_INTERNAL_TEST_VERSION_1,
+            PICOQUIC_TEST_SNI, PICOQUIC_TEST_ALPN, &simulated_time, NULL, NULL, 0, 1, 0, &initial_cid);
+    }
+
+    /* Set the binlog */
+    if (ret == 0) {
+        picoquic_set_binlog(test_ctx->qclient, ".");
+        /* Set the timeout */
+        picoquic_set_default_idle_timeout(test_ctx->qclient, client_timeout);
+        if (handshake_timeout > 0) {
+            picoquic_set_default_handshake_timeout(test_ctx->qclient, handshake_timeout);
+        }
+        /* Directly set the timeout in the client parameters,
+        because the connection context is already created */
+        test_ctx->cnx_client->local_parameters.max_idle_timeout = client_timeout;
+        /* Start the client */
+        ret = picoquic_start_client_cnx(test_ctx->cnx_client);
+    }
+
+    /* Run a simulation loop -- the server never responds. */
+    if (ret == 0) {
+        int nb_trials = 0;
+        while (ret == 0 && simulated_time < expected_timeout) {
+            size_t send_length = 0;
+            struct sockaddr_storage addr_to;
+            struct sockaddr_storage addr_from;
+
+            ret = picoquic_prepare_packet_ex(test_ctx->cnx_client, simulated_time,
+                send_buffer, sizeof(send_buffer), &send_length,
+                &addr_to, &addr_from, 0, NULL);
+            if (ret != 0) {
+                break;
+            }
+            else if (test_ctx->cnx_client->cnx_state == picoquic_state_disconnected) {
+                break;
+            }
+            else if (simulated_time > test_ctx->cnx_client->next_wake_time) {
+                DBG_PRINTF("Idle server test %d. Bug, simulation is walking back in time.", test_id);
+                ret = -1;
+            }
+            else if (nb_trials >= 512) {
+                DBG_PRINTF("Idle server test %d. Bug, simulation exceeds %d steps.", test_id, nb_trials);
+                ret = -1;
+            }
+            else {
+                nb_trials++;
+                simulated_time = test_ctx->cnx_client->next_wake_time;
+            }
+        }
+    }
+
+    if ((ret == 0 && test_ctx->cnx_client->cnx_state == picoquic_state_disconnected) ||
+        ret == PICOQUIC_ERROR_DISCONNECTED) {
+        if (simulated_time < target_timeout) {
+            DBG_PRINTF("Idle server test %d. Client gave up too soon, time = %" PRIu64 "\n", test_id, simulated_time);
+            ret = -1;
+        }
+        else {
+            ret = 0;
+        }
+    }
+    else if (ret == 0) {
+        DBG_PRINTF("Idle server test %d. Client did not disconnect, time = %" PRIu64 "\n", test_id, simulated_time);
+        ret = -1;
+    }
+    else {
+        DBG_PRINTF("Idle server test %d. ret=0x%x, time = %" PRIu64 "\n", ret, test_id, simulated_time);
+    }
+
+    if (test_ctx != NULL) {
+        tls_api_delete_ctx(test_ctx);
+        test_ctx = NULL;
+    }
+
+    return ret;
+}
+
+int idle_server_test()
+{
+    int ret = 0;
+
+    if ((ret = idle_server_test_one(1, 30000, 0, 30100000)) == 0 &&
+        (ret = idle_server_test_one(2, 60000, 0, 60100000)) == 0 &&
+        (ret = idle_server_test_one(3, 5000, 0, 5100000)) == 0 &&
+        (ret = idle_server_test_one(4, 0, 0, 30100000)) == 0 &&
+        (ret = idle_server_test_one(5, 0, 10000, 10100000)) == 0 &&
+        (ret = idle_server_test_one(6, 20000, 60000, 60100000)) == 0 &&
+        (ret = idle_server_test_one(7, 60000, 5000, 5100000)) == 0){
+        DBG_PRINTF("%s", "All idle timeout tests pass.\n");
+    }
     return ret;
 }

@@ -515,12 +515,10 @@ static size_t picoquic_retransmit_needed_packet(picoquic_cnx_t* cnx, picoquic_pa
                     }
                     if (all_paths_bad) {
                         /*
-                        * Max retransmission count was exceeded. Disconnect.
+                        * Max retransmission count was exceeded. Log.
                         */
                         DBG_PRINTF("Too many retransmits of packet number %d, disconnect", (int)old_p->sequence_number);
-                        cnx->local_error = PICOQUIC_ERROR_REPEAT_TIMEOUT;
-                        picoquic_connection_disconnect(cnx);
-                        length = 0;
+
                         *continue_next = 0;
                     }
                 }
@@ -922,7 +920,7 @@ static void picoquic_count_and_notify_loss(
         if (cnx->congestion_alg != NULL && cnx->cnx_state >= picoquic_state_ready && old_p->send_path != NULL) {
             cnx->congestion_alg->alg_notify(cnx, old_p->send_path,
                 (timer_based_retransmit == 0) ? picoquic_congestion_notification_repeat : picoquic_congestion_notification_timeout,
-                0, 0, 0, old_p->sequence_number, current_time);
+                0, 0, 0, old_p->path_packet_number, current_time);
         }
     }
 }

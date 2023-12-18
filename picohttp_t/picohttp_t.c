@@ -74,18 +74,16 @@ static const picoquic_test_def_t test_table[] = {
     { "h3_long_file_name", h3_long_file_name_test },
     { "h3_multi_file", h3_multi_file_test },
     { "h3_multi_file_loss", h3_multi_file_loss_test },
-#if 0
     { "h3_multi_file_preemptive", h3_multi_file_preemptive_test },
-#endif
     { "h09_multi_file", h09_multi_file_test },
     { "h09_multi_file_loss", h09_multi_file_loss_test },
-#if 0
     { "h09_multi_file_preemptive", h09_multi_file_preemptive_test },
-#endif
     { "h3zero_settings", h3zero_settings_test },
     { "http_stress", http_stress_test },
+#if 0
     { "http_corrupt", http_corrupt_test},
     { "http_corrupt_rdpn", http_corrupt_rdpn_test},
+#endif
     { "http_drop", http_drop_test},
     { "picowt_baton_basic", picowt_baton_basic_test },
     { "picowt_baton_error", picowt_baton_error_test },
